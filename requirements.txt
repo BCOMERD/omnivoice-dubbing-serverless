@@ -1,0 +1,7 @@
+runpod
+torch
+torchaudio
+omnivoice
+transformers
+sentencepiece
+soundfile

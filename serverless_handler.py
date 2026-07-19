@@ -39,7 +39,9 @@ def get_translate_model():
         _translate_tokenizer = AutoTokenizer.from_pretrained(
             TRANSLATE_MODEL_NAME, src_lang=SOURCE_LANG
         )
-        _translate_model = AutoModelForSeq2SeqLM.from_pretrained(TRANSLATE_MODEL_NAME).to("cuda:0")
+        _translate_model = AutoModelForSeq2SeqLM.from_pretrained(
+            TRANSLATE_MODEL_NAME, use_safetensors=True
+        ).to("cuda:0")
     return _translate_model, _translate_tokenizer
 
 

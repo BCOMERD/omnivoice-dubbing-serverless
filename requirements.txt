@@ -3,3 +3,5 @@ omnivoice
 transformers
 sentencepiece
 soundfile
+faster-whisper==1.0.3
+demucs==4.0.1

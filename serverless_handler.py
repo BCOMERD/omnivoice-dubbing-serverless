@@ -1,8 +1,11 @@
-"""RunPod Serverless handler. Bundles NLLB translation + OmniVoice voice
+"""RunPod Serverless handler. Bundles voice/music separation (Demucs),
+transcription (faster-whisper), NLLB translation, and OmniVoice voice
 cloning into one auto-scaling endpoint (scales to zero when idle, spins up
 on demand, billed per second of actual use — no manual pod management).
 
 Input shape (event["input"]):
+  {"mode": "separate", "audio_b64": "<base64 wav>"}
+  {"mode": "transcribe", "audio_b64": "<base64 wav>"}
   {"mode": "translate", "texts": ["...", "..."], "target_lang_code": "eng_Latn"}
   {"mode": "generate", "text": "...", "ref_audio_b64": "<base64 wav>"}
 """
@@ -13,6 +16,8 @@ from pathlib import Path
 import runpod
 import soundfile as sf
 import torch
+from demucs.api import Separator, save_audio
+from faster_whisper import WhisperModel
 from omnivoice import OmniVoice
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -22,6 +27,22 @@ SOURCE_LANG = "arb_Arab"
 _tts_model = None
 _translate_model = None
 _translate_tokenizer = None
+_whisper_model = None
+_demucs_separator = None
+
+
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        _whisper_model = WhisperModel("large-v3", device="cuda", compute_type="float16")
+    return _whisper_model
+
+
+def get_demucs_separator():
+    global _demucs_separator
+    if _demucs_separator is None:
+        _demucs_separator = Separator(model="htdemucs", device="cuda")
+    return _demucs_separator
 
 
 def get_tts_model():
@@ -73,6 +94,50 @@ def handle_generate(job_input):
     return {"audio_b64": audio_b64}
 
 
+def handle_separate(job_input):
+    separator = get_demucs_separator()
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as audio_file:
+        audio_file.write(base64.b64decode(job_input["audio_b64"]))
+        audio_path = audio_file.name
+
+    _, separated = separator.separate_audio_file(audio_path)
+    vocals = separated["vocals"]
+    background = sum(v for k, v in separated.items() if k != "vocals")
+
+    vocals_path = audio_path.replace(".wav", "_vocals.wav")
+    background_path = audio_path.replace(".wav", "_background.wav")
+    save_audio(vocals, vocals_path, samplerate=separator.samplerate)
+    save_audio(background, background_path, samplerate=separator.samplerate)
+
+    result = {
+        "vocals_b64": base64.b64encode(Path(vocals_path).read_bytes()).decode(),
+        "background_b64": base64.b64encode(Path(background_path).read_bytes()).decode(),
+    }
+
+    for p in (audio_path, vocals_path, background_path):
+        Path(p).unlink(missing_ok=True)
+
+    return result
+
+
+def handle_transcribe(job_input):
+    model = get_whisper_model()
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as audio_file:
+        audio_file.write(base64.b64decode(job_input["audio_b64"]))
+        audio_path = audio_file.name
+
+    segments_iter, _info = model.transcribe(audio_path, language="ar", word_timestamps=False)
+    segments = [
+        {"start": seg.start, "end": seg.end, "text": seg.text.strip()} for seg in segments_iter
+    ]
+
+    Path(audio_path).unlink(missing_ok=True)
+
+    return {"segments": segments}
+
+
 def handle_debug(job_input):
     import subprocess
     smi = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
@@ -89,14 +154,20 @@ def handler(event):
     job_input = event["input"]
     mode = job_input.get("mode")
 
-    if mode == "translate":
+    if mode == "separate":
+        return handle_separate(job_input)
+    elif mode == "transcribe":
+        return handle_transcribe(job_input)
+    elif mode == "translate":
         return handle_translate(job_input)
     elif mode == "generate":
         return handle_generate(job_input)
     elif mode == "debug":
         return handle_debug(job_input)
     else:
-        return {"error": f"Unknown mode: {mode!r}. Use 'translate', 'generate', or 'debug'."}
+        return {
+            "error": f"Unknown mode: {mode!r}. Use 'separate', 'transcribe', 'translate', 'generate', or 'debug'."
+        }
 
 
 runpod.serverless.start({"handler": handler})

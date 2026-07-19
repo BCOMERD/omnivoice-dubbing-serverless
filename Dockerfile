@@ -11,14 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download both models at build time so cold starts don't re-download
-# them every time a new worker spins up. Done before COPY serverless_handler.py
-# so editing the handler doesn't bust this expensive cache layer.
-# Split into separate unbuffered steps so a failure pinpoints which download broke.
-RUN python -u -c "from omnivoice import OmniVoice; OmniVoice.from_pretrained('k2-fsa/OmniVoice'); print('OMNIVOICE_DOWNLOAD_OK')"
-RUN python -u -c "from transformers import AutoModelForSeq2SeqLM; AutoModelForSeq2SeqLM.from_pretrained('facebook/nllb-200-distilled-600M'); print('NLLB_MODEL_DOWNLOAD_OK')"
-RUN python -u -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('facebook/nllb-200-distilled-600M', src_lang='arb_Arab'); print('NLLB_TOKENIZER_DOWNLOAD_OK')"
-
+# Models are lazily downloaded by the handler on first invocation (see
+# get_tts_model/get_translate_model) rather than baked in at build time --
+# baking them in kept hitting transient HF Hub download failures on RunPod's
+# build workers. Trade-off: first cold start is slower, but builds are
+# reliable and fast.
 COPY serverless_handler.py .
 
 CMD ["python", "serverless_handler.py"]

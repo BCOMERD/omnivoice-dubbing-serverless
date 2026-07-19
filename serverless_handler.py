@@ -71,6 +71,18 @@ def handle_generate(job_input):
     return {"audio_b64": audio_b64}
 
 
+def handle_debug(job_input):
+    import subprocess
+    smi = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
+    return {
+        "torch_version": torch.__version__,
+        "torch_cuda_version": torch.version.cuda,
+        "cuda_available": torch.cuda.is_available(),
+        "nvidia_smi_stdout": smi.stdout,
+        "nvidia_smi_stderr": smi.stderr,
+    }
+
+
 def handler(event):
     job_input = event["input"]
     mode = job_input.get("mode")
@@ -79,8 +91,10 @@ def handler(event):
         return handle_translate(job_input)
     elif mode == "generate":
         return handle_generate(job_input)
+    elif mode == "debug":
+        return handle_debug(job_input)
     else:
-        return {"error": f"Unknown mode: {mode!r}. Use 'translate' or 'generate'."}
+        return {"error": f"Unknown mode: {mode!r}. Use 'translate', 'generate', or 'debug'."}
 
 
 runpod.serverless.start({"handler": handler})

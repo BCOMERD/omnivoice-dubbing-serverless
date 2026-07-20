@@ -94,6 +94,16 @@ def handle_generate(job_input):
     return {"audio_b64": audio_b64}
 
 
+def _compress_to_mp3(wav_path: str) -> str:
+    import subprocess
+    mp3_path = wav_path.replace(".wav", ".mp3")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", wav_path, "-acodec", "libmp3lame", "-b:a", "128k", mp3_path],
+        check=True, capture_output=True,
+    )
+    return mp3_path
+
+
 def handle_separate(job_input):
     separator = get_demucs_separator()
 
@@ -110,12 +120,18 @@ def handle_separate(job_input):
     save_audio(vocals, vocals_path, samplerate=separator.samplerate)
     save_audio(background, background_path, samplerate=separator.samplerate)
 
+    # RunPod's job output has a size limit too (a raw WAV chunk easily blows
+    # past it, causing a "COMPLETED" job with no output at all) -- compress
+    # before returning.
+    vocals_mp3 = _compress_to_mp3(vocals_path)
+    background_mp3 = _compress_to_mp3(background_path)
+
     result = {
-        "vocals_b64": base64.b64encode(Path(vocals_path).read_bytes()).decode(),
-        "background_b64": base64.b64encode(Path(background_path).read_bytes()).decode(),
+        "vocals_b64": base64.b64encode(Path(vocals_mp3).read_bytes()).decode(),
+        "background_b64": base64.b64encode(Path(background_mp3).read_bytes()).decode(),
     }
 
-    for p in (audio_path, vocals_path, background_path):
+    for p in (audio_path, vocals_path, background_path, vocals_mp3, background_mp3):
         Path(p).unlink(missing_ok=True)
 
     return result

@@ -4,8 +4,8 @@ cloning into one auto-scaling endpoint (scales to zero when idle, spins up
 on demand, billed per second of actual use — no manual pod management).
 
 Input shape (event["input"]):
-  {"mode": "separate", "audio_b64": "<base64 wav>"}
-  {"mode": "transcribe", "audio_b64": "<base64 wav>"}
+  {"mode": "separate", "audio_b64": "<base64 mp3>"}
+  {"mode": "transcribe", "audio_b64": "<base64 mp3>"}
   {"mode": "translate", "texts": ["...", "..."], "target_lang_code": "eng_Latn"}
   {"mode": "generate", "text": "...", "ref_audio_b64": "<base64 wav>"}
 """
@@ -97,7 +97,7 @@ def handle_generate(job_input):
 def handle_separate(job_input):
     separator = get_demucs_separator()
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as audio_file:
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as audio_file:
         audio_file.write(base64.b64decode(job_input["audio_b64"]))
         audio_path = audio_file.name
 
@@ -105,8 +105,8 @@ def handle_separate(job_input):
     vocals = separated["vocals"]
     background = sum(v for k, v in separated.items() if k != "vocals")
 
-    vocals_path = audio_path.replace(".wav", "_vocals.wav")
-    background_path = audio_path.replace(".wav", "_background.wav")
+    vocals_path = audio_path.replace(".mp3", "_vocals.wav")
+    background_path = audio_path.replace(".mp3", "_background.wav")
     save_audio(vocals, vocals_path, samplerate=separator.samplerate)
     save_audio(background, background_path, samplerate=separator.samplerate)
 
@@ -124,7 +124,7 @@ def handle_separate(job_input):
 def handle_transcribe(job_input):
     model = get_whisper_model()
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as audio_file:
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as audio_file:
         audio_file.write(base64.b64decode(job_input["audio_b64"]))
         audio_path = audio_file.name
 
